@@ -6,7 +6,7 @@ setup(
     name='alerta-grafana-monitor',
     version=version,
     description='Alerta webhook for Grafana',
-    url='https://github.com/alerta/alerta-contrib',
+    url='https://github.com/martoto997/alerta/tree/main/webhook',
     license='MIT',
     author='Martin Dinev',
     author_email='martoto999@gmail.com',
