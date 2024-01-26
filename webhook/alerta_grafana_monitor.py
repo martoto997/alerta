@@ -1,43 +1,56 @@
-import json
-from alerta.models.alert import Alert
-from alerta.webhooks import WebhookBase
-from dateutil.parser import parse as parse_date
+@app.route('/webhooks/grafana', methods=['OPTIONS', 'POST'])
+@cross_origin()
+@auth_required
+def grafana():
 
-class GrafanaWebhook(WebhookBase):
-    """
-    Grafana alerts webhook
-    Example: https://grafana.com/docs/alerting/notifications/#webhook
-    """
+    hook_started = webhook_timer.start_timer()
+    alerts = parse_grafana(request.data)
 
-    def incoming(self, query_string, payload):
-        # Add your Grafana-specific logic here
-        # Example: extract information from payload for Grafana alerts
+    for incomingAlert in alerts:
+        if g.get('customer', None):
+            incomingAlert.customer = g.get('customer')
 
-        # Placeholder values, modify according to your Grafana payload
-        severity = 'firing'
-        resource = 'GrafanaResource'
-        event = 'GrafanaEvent'
-        environment = 'Production'
-        service = ['GrafanaService']
-        group = 'GrafanaGroup'
-        text = 'Grafana Alert'
-        value = 'GrafanaValue'
-        tags = []
-        create_time = parse_date('2024-01-26T07:21:29')  # Replace with actual timestamp
+        add_remote_ip(request, incomingAlert)
 
-        return Alert(
-            resource=resource,
-            event=event,
-            environment=environment,
-            severity=severity,
-            service=service,
-            group=group,
-            value=value,
-            text=text,
-            tags=tags,
-            attributes={},
+        try:
+            alert = process_alert(incomingAlert)
+        except RejectException as e:
+            webhook_timer.stop_timer(hook_started)
+            return jsonify(status="error", message=str(e)), 403
+        except Exception as e:
+            webhook_timer.stop_timer(hook_started)
+            return jsonify(status="error", message=str(e)), 500
+
+        webhook_timer.stop_timer(hook_started)
+
+    if alert:
+        body = alert.get_body()
+        body['href'] = absolute_url('/alert/' + alert.id)
+        return jsonify(status="ok", id=alert.id, alert=body), 201, {'Location': body['href']}
+    else:
+        return jsonify(status="error", message="insert or update of grafana check failed"), 500
+
+def parse_grafana(check):
+    check = json.loads(check)
+    timeout = 60
+
+    alerts = []
+
+    for item in check['evalMatches']:
+        alerts.append(Alert(
+            status='open',
+            resource=item['metric'],
+            event=check['state'],
+            environment='Production',
+            severity='critical',
+            service=[check['ruleName']],
+            text="Value:" + str(item['value']),
             origin='Grafana',
-            type='GrafanaAlert',
-            create_time=create_time,
-            raw_data=json.dumps(payload)
-        )
+            event_type='Grafana_event',
+            raw_data=item['value'],
+            timeout=timeout,
+            value='Error',
+            group='group'
+        ))
+
+    return alerts
